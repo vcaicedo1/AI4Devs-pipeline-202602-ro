@@ -1,6 +1,6 @@
 name: Backend CI/CD Pipeline
 
-"on":
+on:
   pull_request:
     types: [opened, synchronize]
     branches:
