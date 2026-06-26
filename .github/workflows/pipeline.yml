@@ -28,6 +28,9 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
       - name: Run Unit Tests
         run: npm test
 
@@ -43,9 +46,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install Dependencies
         run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
 
       - name: Compile TypeScript to JS
         run: npm run build
@@ -54,12 +62,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backend-dist
-          path: backend/dist/
+          path: |
+            backend/dist/
+            backend/package.json
+            backend/package-lock.json
+            backend/prisma/
 
   deploy:
     name: Deploy to AWS EC2 via SSH
     runs-on: ubuntu-latest
     needs: build
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -68,25 +81,28 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-dist
-          path: backend/dist/
+          path: .
 
       - name: Deploy to EC2 Instance via SSH
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ secrets.EC2_INSTANCE }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "backend/dist/*"
+          source: "backend/dist/**,backend/package.json,backend/package-lock.json,backend/prisma/**"
           target: "/var/www/backend"
           strip_components: 1
 
       - name: Restart Backend Service via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host: ${{ secrets.EC2_INSTANCE }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
             cd /var/www/backend
-            npm install --production
+            npm ci --omit=dev
+            npx prisma generate
             pm2 restart backend-api || pm2 start dist/index.js --name backend-api
+            pm2 describe backend-api > /dev/null
